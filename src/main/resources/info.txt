@@ -1,0 +1,43 @@
+1. 状态
+PROCESSING 进行中
+PROCESS_DONE 已完成
+PROCESS_FAIL 已失败
+CANCELED 已取消
+DELETE 已删除
+
+2. 创建任务->返回成功->另一个线程做导出下载
+
+3. 表
+t_download_task
+id
+file_name
+status
+fail_reason
+last_id
+
+t_download_task_detail
+id
+task_id
+sql
+column_model
+
+
+4. 异常情况
+ (1)文件导出到一般，系统宕机
+    处理->系统重启的时候扫描PROCESSING的任务，重新处理->查到detail表里的sql
+ (2)导出过程有异常
+    更新为PROCESS_FAIL,写入fail_reason
+
+
+5. 批次化查db，批次化写db，更新last_id
+    使用EasyExcel
+
+6. 场景:t_user表
+    查age>18的数据
+    数据量在5000行上下
+    一个批次大小为500
+
+7. 技术栈
+    RabbitMQ
+    JPA
+
