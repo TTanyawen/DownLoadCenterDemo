@@ -1,18 +1,21 @@
 package com.angela.entity;
 
-import javax.persistence.Entity;
-import javax.persistence.Id;
-import javax.persistence.Table;
+import lombok.Data;
 
-@Entity
-@Table(name = "users")
+import javax.persistence.*;
+
 @Data
+@Entity
+@Table(name="t_user_0306")
 public class User {
-
     @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
-
     private String name;
-    private int age;
-
+    private Integer age;
 }
+//CREATE TABLE t_user_0306 (
+//        id BIGINT PRIMARY KEY AUTO_INCREMENT,
+//        name VARCHAR(100) NOT NULL,
+//age INT
+//) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

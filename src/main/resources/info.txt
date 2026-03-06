@@ -8,14 +8,18 @@ DELETE 已删除
 2. 创建任务->返回成功->另一个线程做导出下载
 
 3. 表
-t_download_task
+t_user_0306
+id
+name
+age
+t_download_task_0306
 id
 file_name
 status
 fail_reason
 last_id
 
-t_download_task_detail
+t_download_task_detail_0306
 id
 task_id
 sql
