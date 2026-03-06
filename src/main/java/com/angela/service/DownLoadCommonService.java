@@ -1,0 +1,190 @@
+package com.angela.service;
+
+import com.alibaba.excel.EasyExcel;
+import com.alibaba.excel.ExcelWriter;
+import com.alibaba.excel.write.metadata.WriteSheet;
+import com.angela.dto.UserExcelDTO;
+import com.angela.entity.DownLoadTask;
+import com.angela.entity.DownLoadTaskDetail;
+import com.angela.enums.DownLoadTaskStatus;
+import com.angela.repo.DownLoadTaskDetailRepo;
+import com.angela.repo.DownLoadTaskRepo;
+import org.springframework.amqp.core.AmqpTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
+import javax.persistence.EntityManager;
+import javax.persistence.Query;
+import java.util.List;
+import java.util.stream.Collectors;
+
+
+@Service
+public class DownLoadCommonService {
+    static int bs=500;
+    //    @Autowired
+//    private UserRepo userRepo;
+    @Autowired
+    private EntityManager entityManager;
+    @Autowired
+    private DownLoadTaskRepo downLoadTaskRepo;
+    @Autowired
+    private DownLoadTaskDetailRepo downLoadTaskDetailRepo;
+
+    @Autowired
+    private AmqpTemplate amqpTemplate;
+
+
+    //同步通用方法
+    //传入bs，baseSql，fileName
+    public long startExport(int bs,String baseSql,String fileName){
+        System.out.println("开始同步导出");
+        long lastId = 0;
+
+        //save任务
+        DownLoadTask task = new DownLoadTask();
+        task.setFileName(fileName);
+        task.setStatus(DownLoadTaskStatus.PROCESSING.getCode());
+        downLoadTaskRepo.save(task);
+
+        //save detail表
+        DownLoadTaskDetail taskDetail = new DownLoadTaskDetail();
+        taskDetail.setTaskId(task.getId());
+        taskDetail.setSqlText(baseSql);
+        taskDetail.setColumnModel("id,name,age");
+        downLoadTaskDetailRepo.save(taskDetail);
+
+        ExcelWriter excelWriter = EasyExcel.write(fileName, UserExcelDTO.class).build();
+        WriteSheet sheet = EasyExcel.writerSheet("user").build();
+
+        try {
+
+            while (true) {//分批导出数据
+                String sql = baseSql +
+                        " AND id > " + lastId +
+                        " ORDER BY id LIMIT " + bs;
+                Query query = entityManager.createNativeQuery(sql);
+                List<Object[]> rows = query.getResultList();
+
+                if (rows.isEmpty()) {
+                    break;
+                }
+
+                List<UserExcelDTO> list = rows.stream().map(r -> {
+                    UserExcelDTO dto = new UserExcelDTO();
+                    dto.setId(((Number) r[0]).longValue());
+                    dto.setName((String) r[1]);
+                    dto.setAge(((Number) r[2]).intValue());
+                    return dto;
+                }).collect(Collectors.toList());
+
+                excelWriter.write(list, sheet);
+
+                lastId = list.get(list.size() - 1).getId();
+                //记录lastId
+                task.setLastId(lastId);
+                downLoadTaskRepo.save(task);
+
+                if (list.size() < bs) {//最后一批处理完成了
+                    break;
+                }
+            }
+            task.setStatus(DownLoadTaskStatus.PROCESS_DONE.getCode());
+            downLoadTaskRepo.save(task);
+
+        } catch(Exception e){
+            task.setStatus(DownLoadTaskStatus.PROCESS_FAIL.getCode());
+            task.setFailReason(e.getMessage());
+            downLoadTaskRepo.save(task);
+        }finally {
+            excelWriter.finish();
+        }
+
+        System.out.println("导出完成");
+        return task.getId();
+    }
+
+    //异步导出
+    public void startExportAsync(int bs,String baseSql,String fileName){
+        //创建任务
+        System.out.println("开始异步导出");
+        long lastId = 0;
+        //save任务
+        DownLoadTask task = new DownLoadTask();
+        task.setFileName(fileName);
+        task.setStatus(DownLoadTaskStatus.PROCESSING.getCode());
+        task.setLastId(lastId);
+        downLoadTaskRepo.save(task);
+
+        //save detail表
+        DownLoadTaskDetail taskDetail = new DownLoadTaskDetail();
+        taskDetail.setTaskId(task.getId());
+        taskDetail.setSqlText(baseSql);
+        taskDetail.setColumnModel("id,name,age");
+        downLoadTaskDetailRepo.save(taskDetail);
+        //发消息
+        amqpTemplate.convertAndSend("download.async.queue", task.getId());
+    }
+    //供mq 消费者调用
+    public void exportForConsumer(Long taskId){
+        //查出task和taskDetail信息
+        DownLoadTask task = downLoadTaskRepo.findById(taskId).get();
+        DownLoadTaskDetail taskDetail = downLoadTaskDetailRepo.findByTaskId(taskId);
+
+        String baseSql=taskDetail.getSqlText();
+        long lastId = task.getLastId()==null?0:task.getLastId();//拿到上一个lastId
+        ExcelWriter excelWriter = EasyExcel.write(task.getFileName(), UserExcelDTO.class).build();
+        WriteSheet sheet = EasyExcel.writerSheet("user").build();
+
+        try {
+
+            while (true) {//分批导出数据
+                String sql = baseSql +
+                        " AND id > " + lastId +
+                        " ORDER BY id LIMIT " + bs;
+                Query query = entityManager.createNativeQuery(sql);
+                List<Object[]> rows = query.getResultList();
+
+                if (rows.isEmpty()) {
+                    break;
+                }
+
+                List<UserExcelDTO> list = rows.stream().map(r -> {
+                    UserExcelDTO dto = new UserExcelDTO();
+                    dto.setId(((Number) r[0]).longValue());
+                    dto.setName((String) r[1]);
+                    dto.setAge(((Number) r[2]).intValue());
+                    return dto;
+                }).collect(Collectors.toList());
+
+                excelWriter.write(list, sheet);
+
+                lastId = list.get(list.size() - 1).getId();
+                //记录lastId
+                task.setLastId(lastId);
+                downLoadTaskRepo.save(task);
+
+                if (list.size() < bs) {//最后一批处理完成了
+                    break;
+                }
+            }
+            task.setStatus(DownLoadTaskStatus.PROCESS_DONE.getCode());
+            downLoadTaskRepo.save(task);
+
+        } catch(Exception  e){
+            task.setStatus(DownLoadTaskStatus.PROCESS_FAIL.getCode());
+            task.setFailReason(e.getMessage());
+        }finally {
+            excelWriter.finish();
+        }
+
+        System.out.println("导出完成");
+    }
+    public void retryProcessingTask(){
+        //查出所有Processing状态的task和taskDetail信息
+        List<DownLoadTask> tasks = downLoadTaskRepo.findByStatus(DownLoadTaskStatus.PROCESSING.getCode());
+        for(DownLoadTask task:tasks){
+            exportForConsumer(task.getId());
+        }
+    }
+}
