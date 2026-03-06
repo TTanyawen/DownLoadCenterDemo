@@ -97,7 +97,11 @@ public class DownLoadService {
             task.setStatus(DownLoadTaskStatus.PROCESS_DONE.getCode());
             downLoadTaskRepo.save(task);
 
-        } finally {
+        } catch(Exception e){
+            task.setStatus(DownLoadTaskStatus.PROCESS_FAIL.getCode());
+            task.setFailReason(e.getMessage());
+            downLoadTaskRepo.save(task);
+        }finally {
             excelWriter.finish();
         }
 
@@ -179,7 +183,10 @@ public class DownLoadService {
             task.setStatus(DownLoadTaskStatus.PROCESS_DONE.getCode());
             downLoadTaskRepo.save(task);
 
-        } finally {
+        } catch(Exception  e){
+            task.setStatus(DownLoadTaskStatus.PROCESS_FAIL.getCode());
+            task.setFailReason(e.getMessage());
+        }finally {
             excelWriter.finish();
         }
 
