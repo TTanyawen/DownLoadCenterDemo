@@ -91,11 +91,11 @@ public class DownLoadService {
                 downLoadTaskRepo.save(task);
 
                 if (list.size() < bs) {//最后一批处理完成了
-                    task.setStatus(DownLoadTaskStatus.PROCESS_DONE.getCode());
-                    downLoadTaskRepo.save(task);
                     break;
                 }
             }
+            task.setStatus(DownLoadTaskStatus.PROCESS_DONE.getCode());
+            downLoadTaskRepo.save(task);
 
         } finally {
             excelWriter.finish();
@@ -173,16 +173,23 @@ public class DownLoadService {
                 downLoadTaskRepo.save(task);
 
                 if (list.size() < bs) {//最后一批处理完成了
-                    task.setStatus(DownLoadTaskStatus.PROCESS_DONE.getCode());
-                    downLoadTaskRepo.save(task);
                     break;
                 }
             }
+            task.setStatus(DownLoadTaskStatus.PROCESS_DONE.getCode());
+            downLoadTaskRepo.save(task);
 
         } finally {
             excelWriter.finish();
         }
 
         System.out.println("导出完成");
+    }
+    public void retryProcessingTask(){
+        //查出所有Processing状态的task和taskDetail信息
+        List<DownLoadTask> tasks = downLoadTaskRepo.findByStatus(DownLoadTaskStatus.PROCESSING.getCode());
+        for(DownLoadTask task:tasks){
+            exportUserOlderThen18Async_consumer(task.getId());
+        }
     }
 }
