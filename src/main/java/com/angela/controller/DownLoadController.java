@@ -17,4 +17,11 @@ public class DownLoadController {
         downLoadService.exportUserOlderThen18();
     }
 
+    // http://localhost:8087/download/exportUserOlderThen18/async
+    @RequestMapping("/exportUserOlderThen18/async")
+    public String exportUserOlderThen18Async(){
+        downLoadService.exportUserOlderThen18Async();
+        return "success";
+    }
+
 }

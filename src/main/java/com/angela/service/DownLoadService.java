@@ -9,6 +9,7 @@ import com.angela.entity.DownLoadTaskDetail;
 import com.angela.enums.DownLoadTaskStatus;
 import com.angela.repo.DownLoadTaskDetailRepo;
 import com.angela.repo.DownLoadTaskRepo;
+import org.springframework.amqp.core.AmqpTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -28,6 +29,11 @@ public class DownLoadService {
     private DownLoadTaskRepo downLoadTaskRepo;
     @Autowired
     private DownLoadTaskDetailRepo downLoadTaskDetailRepo;
+
+    @Autowired
+    private AmqpTemplate amqpTemplate;
+
+
     //导出所有大于18岁的user到excel表
     //先做同步的
     public void exportUserOlderThen18(){
@@ -97,5 +103,86 @@ public class DownLoadService {
 
         System.out.println("导出完成");
 
+    }
+
+    //异步导出
+    public void exportUserOlderThen18Async(){
+        //创建任务
+        System.out.println("开始导出所有大于18岁的user到excel表");
+
+        String fileName = "E:\\AAAProjectForLearning\\DownLoadCenterDemo\\DownLoadCenterDemo\\temp\\user_over_18.xlsx";
+
+        long lastId = 0;
+
+        // 需要执行的SQL
+        String baseSql = "SELECT id,name,age FROM t_user_0306 WHERE age > 18";
+
+        //save任务
+        DownLoadTask task = new DownLoadTask();
+        task.setFileName(fileName);
+        task.setStatus(DownLoadTaskStatus.PROCESSING.getCode());
+        task.setLastId(lastId);
+        downLoadTaskRepo.save(task);
+
+        //save detail表
+        DownLoadTaskDetail taskDetail = new DownLoadTaskDetail();
+        taskDetail.setTaskId(task.getId());
+        taskDetail.setSqlText(baseSql);
+        taskDetail.setColumnModel("id,name,age");
+        downLoadTaskDetailRepo.save(taskDetail);
+        //发消息
+        amqpTemplate.convertAndSend("download.async.queue", task.getId());
+    }
+    //供mq 消费者调用
+    public void exportUserOlderThen18Async_consumer(Long taskId){
+        //查出task和taskDetail信息
+        DownLoadTask task = downLoadTaskRepo.findById(taskId).get();
+        DownLoadTaskDetail taskDetail = downLoadTaskDetailRepo.findByTaskId(taskId);
+
+        String baseSql=taskDetail.getSqlText();
+        long lastId = task.getLastId()==null?0:task.getLastId();//拿到上一个lastId
+        ExcelWriter excelWriter = EasyExcel.write(task.getFileName(), UserExcelDTO.class).build();
+        WriteSheet sheet = EasyExcel.writerSheet("user").build();
+
+        try {
+
+            while (true) {//分批导出数据
+                String sql = baseSql +
+                        " AND id > " + lastId +
+                        " ORDER BY id LIMIT " + bs;
+                Query query = entityManager.createNativeQuery(sql);
+                List<Object[]> rows = query.getResultList();
+
+                if (rows.isEmpty()) {
+                    break;
+                }
+
+                List<UserExcelDTO> list = rows.stream().map(r -> {
+                    UserExcelDTO dto = new UserExcelDTO();
+                    dto.setId(((Number) r[0]).longValue());
+                    dto.setName((String) r[1]);
+                    dto.setAge(((Number) r[2]).intValue());
+                    return dto;
+                }).collect(Collectors.toList());
+
+                excelWriter.write(list, sheet);
+
+                lastId = list.get(list.size() - 1).getId();
+                //记录lastId
+                task.setLastId(lastId);
+                downLoadTaskRepo.save(task);
+
+                if (list.size() < bs) {//最后一批处理完成了
+                    task.setStatus(DownLoadTaskStatus.PROCESS_DONE.getCode());
+                    downLoadTaskRepo.save(task);
+                    break;
+                }
+            }
+
+        } finally {
+            excelWriter.finish();
+        }
+
+        System.out.println("导出完成");
     }
 }
